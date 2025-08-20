@@ -20,7 +20,6 @@ const int FOCAL_LENGTH = 256;
 const int ASPECT_RATIO = WINDOW_WIDTH / WINDOW_HEIGHT;
 const int NEAR_PLANE = 30;
 const int FAR_PLANE = 5000;
-const float S2 = 1.4142;
 const SDL_PixelFormatDetails* PIXELFORMAT = SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA8888);
 
 
@@ -57,8 +56,7 @@ struct Tri2d_t { //for projected 3d triangles
 };
 
 struct Plane_t {//for clipping planes etc
-    Vec3d_t normal;
-    float distance;
+    Vec4d_t normal;
 };
 
 
@@ -80,11 +78,13 @@ struct MeshInstance_t {
 struct Camera_t {
     struct Vec4d_t position;
     struct Vec4d_t rotation;
-    std::vector<Plane_t> clippingPlanes = {{Vec3d_t{0, 0, 0}, 1},   //near
-                                                 {Vec3d_t{S2, 0, S2}, 0}, //left
-                                                 {Vec3d_t{-S2, 0, S2}, 0},//right
-                                                 {Vec3d_t{0, -S2, S2}, 0},//top 
-                                                 {Vec3d_t{0, S2, S2}, 0}};//bottom
+    std::vector<Plane_t> clippingPlanes = {
+        {Vec4d_t{0, 0, 0, 0}},   //near
+        {Vec4d_t{1, 0, 0, 1}}, //left
+        {Vec4d_t{-1, 0, 0, 1}},//right
+        {Vec4d_t{0, -1, 0, 1}},//top 
+        {Vec4d_t{0, 1, 0, 1}},//bottom
+        {Vec4d_t{0, 0, -1, 1}},//far
 };
 
 struct Scene_t {
@@ -165,7 +165,7 @@ void interpolatef(std::vector<float> &values, float i0, float d0, float i1, floa
     float d = d0;
     int i;
     for (i = i0; i <= i1; i++) {
-            values.push_back(d);
+        values.push_back(d);
         d += a;
     }
 }
@@ -195,8 +195,24 @@ Vec4d_t matrixMult4x4Vec4d_t(float multMatrix[4][4], Vec4d_t v) {
 }
 
 float signedDistance(Plane_t p, Vec4d_t v) {
-    float distance = (v.x * p.normal.x) + (v.y * p.normal.y) + (v.z * p.normal.z) + p.distance;
+    float distance = (v.x * p.normal.x) + (v.y * p.normal.y) + (v.z * p.normal.z) + (v.w * p.normal.w);
     return distance;
+}
+
+Vec4d_t linePlaneIntersection(Vec4d_t a, Vec4d_t b, Plane_t p) {
+    float t, sum1, sum2;
+    Vec4d_t i;
+    sum1 = (a.x * p.normal.x) + (a.y * p.normal.y) + (a.z * p.normal.z) + (a.w * p.normal.w);
+    sum2 = (b.x * p.normal.x) + (b.y * p.normal.y) + (b.z * p.normal.z) + (b.w * p.normal.w);
+    if (sum2 == 0) {//the line is parallel with the plane
+        return a;
+    }
+    t = sum1 / (sum1 - sum2);   
+    i.x = a.x + (b.x - a.x) * t;
+    i.y = a.y + (b.y - a.y) * t;
+    i.z = a.z + (b.z - a.z) * t;
+    i.w = a.w + (b.w - a.w) * t;
+    return i;
 }
 
 void projectMeshMatrix(std::vector<Tri4d_t>& Mesh){
@@ -261,7 +277,7 @@ void rotateMesh(std::vector<Tri4d_t>& Mesh, Vec4d_t Rotation) {
     translateMesh(Mesh, { 0,0,-FOCAL_LENGTH });
 }
 
-int clipOrCull(MeshInstance_t mesh, Camera_t camera /*clipping plane_t whatever*/) {
+int clipOrCull(MeshInstance_t mesh, Camera_t camera) {
     /*transform and rotate only the bounding sphere coords not the entire mesh
     if fully in = 0
     if fully out = 1
@@ -274,11 +290,12 @@ int clipOrCull(MeshInstance_t mesh, Camera_t camera /*clipping plane_t whatever*
     //rotateMesh(tBC, camera.rotation);
     //rotateMesh(tBC, mesh.rot);
     projectMeshMatrix(tBC);
+    //we in clip space now
     int result;
     float distance = 0;
     for (i = 0; i < camera.clippingPlanes.size(); i++) {
         distance = signedDistance(camera.clippingPlanes[i], tBC[0].v0);
-        if (distance > mesh.parentMesh.boundRadius) {
+        if (distance >= -mesh.parentMesh.boundRadius) {
             result = 0;
         }
         else if (distance < -mesh.parentMesh.boundRadius) {
@@ -288,36 +305,88 @@ int clipOrCull(MeshInstance_t mesh, Camera_t camera /*clipping plane_t whatever*
             result = 2;
         }
     }
-    return result;
 }
 
-void clipTriangle(std::vector<Tri4d_t>& mesh, Plane_t plane) {
+std::vector<Tri4d_t> clipTriangle(std::vector<Tri4d_t>& mesh, Plane_t plane) {
     int i;
-    float A, B, C;
-    Tri4d_t empty;
+    Vec4d_t A, B, C, TA, TB, TC;
+    std::vector<Tri4d_t> clipped;
     for (i = 0; i < mesh.size(); i++) {
         float d0, d1, d2;
         d0 = signedDistance(plane, mesh[i].v0);
         d1 = signedDistance(plane, mesh[i].v1);
         d2 = signedDistance(plane, mesh[i].v2);
-
         if (d0 > 0 && d1 > 0 && d2 > 0) {//no clipping needed, do nothing            
-            //mesh[i] = mesh[i];
+            clipped.push_back(mesh[i]);
         }
         else if (d0 < 0 && d1 < 0 && d2 < 0) {//all out of the selection      
-            mesh[i] = empty;
+            //fully out
         }
         else if (((d0 > 0) + (d1 > 0) + (d2 > 0)) == 1) {//only one positive
-            A = d0 > d1 ? (d0 > d2 ? d0 : d1) : (d1 > d2 ? d1 : d2);//because we have no idea which was positive
-            //do stuff to make new tringle
+            //A will be the positive vertex
+            if (d0 > d1) {
+                if (d0 > d2) {
+                    A = mesh[i].v0;
+                    B = mesh[i].v1;
+                    C = mesh[i].v2;
+                }
+                else {
+                    A = mesh[i].v2;
+                    B = mesh[i].v1;
+                    C = mesh[i].v0;
+                }
+            }
+            else {
+                if (d1 > d2) {
+                    A = mesh[i].v1;
+                    B = mesh[i].v2;
+                    C = mesh[i].v0;
+                }
+                else {
+                    A = mesh[i].v2;
+                    B = mesh[i].v1;
+                    C = mesh[i].v0;
+                }
+            }
+            TB = linePlaneIntersection(A, B, plane);
+            TC = linePlaneIntersection(A, C, plane);
+            clipped.push_back(Tri4d_t{ A, TB, TC });
         }
         else if (((d0 < 0) + (d1 < 0) + (d2 < 0)) == 1) {//only one negative
-            C = d0 < d1 ? (d0 < d2 ? d0 : d1) : (d1 < d2 ? d1 : d2);//c will be the negative one
+            //c will be the negative one
+            if (d0 < d1) {
+                if (d0 < d2) {
+                    C = mesh[i].v0;
+                    B = mesh[i].v1;
+                    A = mesh[i].v2;
+                }
+                else {
+                    C = mesh[i].v2;
+                    B = mesh[i].v1;
+                    A = mesh[i].v0;
+                }
+            }
+            else {
+                if (d1 < d2) {
+                    C = mesh[i].v1;
+                    B = mesh[i].v2;
+                    A = mesh[i].v0;
+                }
+                else {
+                    C = mesh[i].v2;
+                    B = mesh[i].v1;
+                    A = mesh[i].v0;
+                }
+            }
+            TA = linePlaneIntersection(A, C, plane);
+            TB = linePlaneIntersection(B, C, plane);
+            clipped.push_back(Tri4d_t{ A, B, TA });
+            clipped.push_back(Tri4d_t{ TA, B, TB });
         }
     }
 }
 
-std::vector<Tri4d_t> rotTranClipMesh(struct MeshInstance_t mesh, struct Camera_t camera /*clipping plane_t whatever*/) {
+std::vector<Tri4d_t> rotTranClipMesh(struct MeshInstance_t mesh, struct Camera_t camera ) {
     /*copy the triangle array, rotate and transform it and do whatever needed to trim it down and return another
     array of triangles*/
     int i, cResult;
@@ -1271,7 +1340,8 @@ void static setup_scene() {
         { {400.0, 800.0, 400.0}, {400.0, 800.0, 800.0}, {800.0, 800.0, 800.0} },
         { {400.0, 800.0, 400.0}, {800.0, 800.0, 800.0}, {800.0, 800.0, 400.0} },
         { {400.0, 400.0, 400.0}, {800.0, 400.0, 800.0}, {400.0, 400.0, 800.0} },
-        { {400.0, 400.0, 400.0}, {800.0, 400.0, 400.0}, {800.0, 400.0, 800.0} } };
+        { {400.0, 400.0, 400.0}, {800.0, 400.0, 400.0}, {800.0, 400.0, 800.0} } 
+    };
 
 
     struct Mesh_t cubeCube;
