@@ -345,7 +345,7 @@ int clipOrCull(MeshInstance_t mesh, Camera_t camera) {
     //we in clip space now
     int result = 2;
     float distance = 0;
-    if (tBC[0].v0.w <= 0) return 0;
+    if (tBC[0].v0.w <= 0) return 1;
     if ((tBC[0].v0.x + mesh.parentMesh.boundRadius < -tBC[0].v0.w) || (tBC[0].v0.x - mesh.parentMesh.boundRadius > tBC[0].v0.w) ||
         (tBC[0].v0.y + mesh.parentMesh.boundRadius < -tBC[0].v0.w) || (tBC[0].v0.y - mesh.parentMesh.boundRadius > tBC[0].v0.w) ||
         (tBC[0].v0.z + mesh.parentMesh.boundRadius < -tBC[0].v0.w) || (tBC[0].v0.z - mesh.parentMesh.boundRadius > tBC[0].v0.w)) {
@@ -664,7 +664,7 @@ void static setup_scene() {
     
 
     struct Camera_t camera;
-    camera.position = { 0,0,0 };
+    camera.position = { -160,-160,-300 };
     camera.rotation = { 0,0,0 };
 
     rendererScene.meshInstances.push_back(mesh1Instance);
@@ -697,10 +697,10 @@ void render(Uint64 aTicks)/*does the funny rendering*/
             gFrameBuffer[c] = 0x000000ff;
         }
     }
-    //rendererScene.meshInstances[0].rot.x += 0.001;
-    //rendererScene.meshInstances[0].rot.y += 0.001;
-    //rendererScene.meshInstances[0].rot.z += 0.001;
-    rendererScene.meshInstances[0].pos.z -= 0.1;
+    rendererScene.meshInstances[0].rot.x += 0.001;
+    rendererScene.meshInstances[0].rot.y += 0.001;
+    rendererScene.meshInstances[0].rot.z += 0.001;
+    //rendererScene.meshInstances[0].pos.z += 0.1;
     render_scene(rendererScene);
    
 }
