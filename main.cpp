@@ -14,13 +14,13 @@ SDL_Window* gSDLWindow;
 SDL_Renderer* gSDLRenderer; 
 SDL_Texture* gSDLTexture;
 static int gDone;
-const int WINDOW_WIDTH = 1920;
-const int WINDOW_HEIGHT = 1080;
-const float FOV = 90.0f * 3.14f / 180.0f;//60 degree fov
-const float F = 1.0f / tan(FOV / 2.0f);
+const int WINDOW_WIDTH = 1920 / 2;
+const int WINDOW_HEIGHT = 1080 / 2;
+const float FOV = 120.0f * 3.14159f / 180.0f;//60 degree fov
+const double F = 1.0f / tan(FOV / 2.0f);
 const float ASPECT_RATIO = (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT;
-const int NEAR = 1;
-const int FAR = 500;
+const int NEAR = 10;
+const int FAR = 1000;
 const float projectionMatrix[4][4] = {
     {F / ASPECT_RATIO, 0, 0, 0},
     {0, F, 0, 0},
@@ -43,6 +43,7 @@ Clip triangles against near plane in camera space (z >= NEAR).
 Clip triangles against near plane in camera space (z >= NEAR).
 Clip triangles against near plane in camera space (z >= NEAR).
 Clip triangles against near plane in camera space (z >= NEAR).
+cliporcull with a bounding rectangle instead of a bounding point
 */
 
 struct Vec4d_t {
@@ -93,12 +94,12 @@ struct Camera_t {
     struct Vec4d_t position;
     struct Vec4d_t rotation;
     std::vector<Plane_t> clippingPlanes = {
-        {Vec4d_t{1, 0, 0, 1}}, //left
-        {Vec4d_t{-1, 0, 0, 1}}, //right
-        {Vec4d_t{0, 1, 0, 1}},//bottom
-        {Vec4d_t{0, -1, 0, 1}},//top 
-        {Vec4d_t{0, 0, 1, 1}}, //near
-        {Vec4d_t{0, 0, -1, 1}} //far
+        {Vec4d_t{1.0, 0.0, 0.0, 1.0}}, //left
+        {Vec4d_t{-1.0, 0.0, 0.0, 1.0}}, //right
+        {Vec4d_t{0.0, 1.0, 0.0, 1.0}},//bottom
+        {Vec4d_t{0.0, -1.0, 0.0, 1.0}},//top 
+        {Vec4d_t{0.0, 0.0, 1.0, 1.0}}, //near
+        {Vec4d_t{0.0, 0.0, -1.0, 1.0}} //far
     };
 };
 
@@ -142,22 +143,6 @@ int setPixel(int X, int Y, Uint32 Colour) {
     gFrameBuffer[X + ((Y - 1) * WINDOW_WIDTH)] = Colour;
     return 1;
 }
-
-/*
-Tri2d_t projectTri(Tri4d_t Tri){//slated for removal
-    Tri2d_t PTri; 
-    PTri.v0.x = (Tri.v0.x * FOCAL_LENGTH / (FOCAL_LENGTH + Tri.v0.z)) + (WINDOW_WIDTH / 2);
-    PTri.v0.y = -(Tri.v0.y * FOCAL_LENGTH / (FOCAL_LENGTH + Tri.v0.z)) + (WINDOW_HEIGHT / 2);
-
-    PTri.v1.x = (Tri.v1.x * FOCAL_LENGTH / (FOCAL_LENGTH + Tri.v1.z)) + (WINDOW_WIDTH / 2);
-    PTri.v1.y = -(Tri.v1.y * FOCAL_LENGTH / (FOCAL_LENGTH + Tri.v1.z)) + (WINDOW_HEIGHT / 2);
-
-    PTri.v2.x = (Tri.v2.x * FOCAL_LENGTH / (FOCAL_LENGTH + Tri.v2.z)) + (WINDOW_WIDTH / 2);
-    PTri.v2.y = -(Tri.v2.y * FOCAL_LENGTH / (FOCAL_LENGTH + Tri.v2.z)) + (WINDOW_HEIGHT / 2);
-
-    return PTri;
-}
-*/
 
 void interpolatei(std::vector<int> &values, float i0, float d0, float i1, float d1){//pass in a vector 
     if (i0 == i1) {
@@ -342,19 +327,20 @@ int clipOrCull(MeshInstance_t mesh, Camera_t camera) {
     rotateMesh(tBC, camera.rotation);
     translateMesh(tBC, camera.position);    
     projectMeshMatrix(tBC);
+    float wRadius = mesh.parentMesh.boundRadius / tBC[0].v0.w;
     //we in clip space now
     int result = 2;
     float distance = 0;
     if (tBC[0].v0.w <= 0) return 1;
-    if ((tBC[0].v0.x + mesh.parentMesh.boundRadius < -tBC[0].v0.w) || (tBC[0].v0.x - mesh.parentMesh.boundRadius > tBC[0].v0.w) ||
-        (tBC[0].v0.y + mesh.parentMesh.boundRadius < -tBC[0].v0.w) || (tBC[0].v0.y - mesh.parentMesh.boundRadius > tBC[0].v0.w) ||
-        (tBC[0].v0.z + mesh.parentMesh.boundRadius < -tBC[0].v0.w) || (tBC[0].v0.z - mesh.parentMesh.boundRadius > tBC[0].v0.w)) {
-        result = 0;//above test for outside, outside on any plane -> cull
+    if ((tBC[0].v0.x + wRadius < -tBC[0].v0.w) || (tBC[0].v0.x - wRadius > tBC[0].v0.w) ||
+        (tBC[0].v0.y + wRadius < -tBC[0].v0.w) || (tBC[0].v0.y - wRadius > tBC[0].v0.w) ||
+        (tBC[0].v0.z + wRadius < -tBC[0].v0.w) || (tBC[0].v0.z - wRadius > tBC[0].v0.w)) {
+        result = 1;//above test for outside, outside on any plane -> cull
     }
-    if ((tBC[0].v0.x - mesh.parentMesh.boundRadius >= -tBC[0].v0.w) && (tBC[0].v0.x + mesh.parentMesh.boundRadius <= tBC[0].v0.w) &&
-        (tBC[0].v0.y - mesh.parentMesh.boundRadius >= -tBC[0].v0.w) && (tBC[0].v0.y + mesh.parentMesh.boundRadius <= tBC[0].v0.w) &&
-        (tBC[0].v0.z - mesh.parentMesh.boundRadius >= -tBC[0].v0.w) && (tBC[0].v0.z + mesh.parentMesh.boundRadius <= tBC[0].v0.w)) {
-        result = 1;//above test for inside, inside on all planes -> inside
+    if ((tBC[0].v0.x - wRadius >= -tBC[0].v0.w) && (tBC[0].v0.x + wRadius <= tBC[0].v0.w) &&
+        (tBC[0].v0.y - wRadius >= -tBC[0].v0.w) && (tBC[0].v0.y + wRadius <= tBC[0].v0.w) &&
+        (tBC[0].v0.z - wRadius >= -tBC[0].v0.w) && (tBC[0].v0.z + wRadius <= tBC[0].v0.w)) {
+        result = 0;//above test for inside, inside on all planes -> inside
     }
     return result;
 }
@@ -433,7 +419,6 @@ void clipTriangle(std::vector<Tri4d_t>& output, Tri4d_t input, Plane_t plane) {
         output.push_back(Tri4d_t{ TA, B, TB });
     }
 }
-
 
 std::vector<Tri4d_t> clipMesh(std::vector<Tri4d_t>& mesh, Camera_t camera) {
     int i, j;
@@ -642,11 +627,32 @@ float Loop = 1;
 void static setup_scene() {
 
     std::vector<Tri4d_t> mesh1 = {
-        //bound centre
-        {{150,150,150}, {150,150,150}, {150,150,150}},
+        // bound centre
+        {{150,150,150,1}, {150,150,150,1}, {150,150,150,1}},
+
         // Front face (z = 200)
-        { {100,100,200,1}, {200,100,200,1}, {200,200,200,1} },
-        { {100,100,200,1}, {200,200,200,1}, {100,200,200,1} }
+        {{100,100,200,1}, {200,100,200,1}, {200,200,200,1}},
+        {{100,100,200,1}, {200,200,200,1}, {100,200,200,1}},
+
+        // Back face (z = 100)
+        {{100,100,100,1}, {200,200,100,1}, {200,100,100,1}},
+        {{100,100,100,1}, {100,200,100,1}, {200,200,100,1}},
+
+        // Left face (x = 100)
+        {{100,100,100,1}, {100,100,200,1}, {100,200,200,1}},
+        {{100,100,100,1}, {100,200,200,1}, {100,200,100,1}},
+
+        // Right face (x = 200)
+        {{200,100,100,1}, {200,200,200,1}, {200,100,200,1}},
+        {{200,100,100,1}, {200,200,100,1}, {200,200,200,1}},
+
+        // Top face (y = 200)
+        {{100,200,100,1}, {100,200,200,1}, {200,200,200,1}},
+        {{100,200,100,1}, {200,200,200,1}, {200,200,100,1}},
+
+        // Bottom face (y = 100)
+        {{100,100,100,1}, {200,100,200,1}, {100,100,200,1}},
+        {{100,100,100,1}, {200,100,100,1}, {200,100,200,1}},
     };
 
 
@@ -654,7 +660,7 @@ void static setup_scene() {
     cubeCube.Triangles = mesh1;
     cubeCube.triCount = mesh1.size();
     cubeCube.boundCentre = { 150,150,150 };
-    cubeCube.boundRadius = 200;
+    cubeCube.boundRadius = 75;
 
     struct MeshInstance_t mesh1Instance;
     mesh1Instance.parentMesh = cubeCube;
@@ -664,7 +670,7 @@ void static setup_scene() {
     
 
     struct Camera_t camera;
-    camera.position = { -160,-160,-300 };
+    camera.position = { -180,-180,-300 };
     camera.rotation = { 0,0,0 };
 
     rendererScene.meshInstances.push_back(mesh1Instance);
@@ -697,7 +703,7 @@ void render(Uint64 aTicks)/*does the funny rendering*/
             gFrameBuffer[c] = 0x000000ff;
         }
     }
-    rendererScene.meshInstances[0].rot.x += 0.001;
+    //rendererScene.meshInstances[0].rot.x += 0.001;
     rendererScene.meshInstances[0].rot.y += 0.001;
     rendererScene.meshInstances[0].rot.z += 0.001;
     //rendererScene.meshInstances[0].pos.z += 0.1;
