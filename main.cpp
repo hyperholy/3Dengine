@@ -82,7 +82,7 @@ struct Mesh_t {
     std::vector<Tri4d_t> boundBox;// 8 vertices but in a triangle due to how stuff is processed here
 };
 
-struct MeshInstance_t {
+struct MeshInstance_t {//an instance of a predefined mesh to be in scene
     struct Mesh_t parentMesh;
     struct Vec4d_t pos = { 0,0,0 };
     struct Vec4d_t rot = { 0,0,0 };
@@ -102,7 +102,7 @@ struct Camera_t {
     };
 };
 
-struct Scene_t {
+struct Scene_t {//a scene is a bunch of instances of meshes and a camera
     std::vector<MeshInstance_t> meshInstances;
     int meshInstanceCount = 0;
     struct Camera_t camera;
@@ -117,24 +117,7 @@ void swapVec2d_t(Vec2d_t* a, Vec2d_t* b) {//in go pointer to passed thingy so it
     *b = temp;
 }
 
-void addTri4d_tVec4d_t(Tri4d_t* a, Vec4d_t* b) {//we're using this for translation so w wont be getting added
-    a->v0.x += b->x;
-    a->v0.y += b->y;
-    a->v0.z += b->z;
-    //a->v0.w += b->w;
-
-    a->v1.x += b->x;
-    a->v1.y += b->y;
-    a->v1.z += b->z;
-   // a->v1.w += b->w;
-
-    a->v2.x += b->x;
-    a->v2.y += b->y;
-    a->v2.z += b->z;
-   // a->v2.w += b->w;
-}
-
-int setPixel(int X, int Y, Uint32 Colour) {
+int setPixel(int X, int Y, Uint32 Colour) {//sets a pixel in the frame buffer to a colour, w/ some limits to avoid index errors
     if (Y == 0) Y++; if (X == 0) X++;
     if (X <= 0 || X > WINDOW_WIDTH - 1) return -1;
     if (Y <= 0 || Y > WINDOW_HEIGHT - 1) return -1;
@@ -143,7 +126,7 @@ int setPixel(int X, int Y, Uint32 Colour) {
     return 1;
 }
 
-void interpolatei(std::vector<int> &values, float i0, float d0, float i1, float d1){//pass in a vector 
+void interpolatei(std::vector<int> &values, float i0, float d0, float i1, float d1){//pass in a vector interpolates whole integers
     if (i0 == i1) {
         values.clear();
         values.push_back(d0);
@@ -157,7 +140,7 @@ void interpolatei(std::vector<int> &values, float i0, float d0, float i1, float 
     }
 }
 
-void interpolatef(std::vector<float> &values, float i0, float d0, float i1, float d1) {//pass in a vector 
+void interpolatef(std::vector<float> &values, float i0, float d0, float i1, float d1) {//pass in a vector interpolates floats
     if (i0 == i1) {
         values.clear();
         values.push_back(d0);
@@ -171,7 +154,7 @@ void interpolatef(std::vector<float> &values, float i0, float d0, float i1, floa
     }
 }
 
-Uint32 multiplyColour(Uint32 colour1, float n) {
+Uint32 multiplyColour(Uint32 colour1, float n) {//multiplies two colours based off RGBA format
     Uint8 r1, g1, b1, a1;
     SDL_GetRGBA(colour1, PIXELFORMAT, NULL, &r1, &g1, &b1, &a1);
     Uint8 r = (r1 * n);
@@ -181,7 +164,7 @@ Uint32 multiplyColour(Uint32 colour1, float n) {
     return(SDL_MapRGBA(PIXELFORMAT, NULL, r, g, b, a));
 }
 
-Vec4d_t matrixMult4x4Vec4d_t(const float multMatrix[4][4], Vec4d_t v) {
+Vec4d_t matrixMult4x4Vec4d_t(const float multMatrix[4][4], Vec4d_t v) {//matrix multiplication of a 4x4 matrix and a 1x4 coordinate
     int i, j;
     Vec4d_t tv = { 0,0,0,0 };
     for (i = 0; i < 4; i++) {
@@ -195,12 +178,12 @@ Vec4d_t matrixMult4x4Vec4d_t(const float multMatrix[4][4], Vec4d_t v) {
     return tv;
 }
 
-float signedDistance(Plane_t p, Vec4d_t v) {
+float signedDistance(Plane_t p, Vec4d_t v) {//signed distance between a point and a plane in 4d space
     float distance = (v.x * p.normal.x) + (v.y * p.normal.y) + (v.z * p.normal.z) + (v.w * p.normal.w);
     return distance;
 }
 
-Vec4d_t linePlaneIntersection(Vec4d_t a, Vec4d_t b, Plane_t p) {
+Vec4d_t linePlaneIntersection(Vec4d_t a, Vec4d_t b, Plane_t p) {//intersection of a plane and two points in 4d space
     float t, sum1, sum2;
     Vec4d_t i;
     sum1 = (a.x * p.normal.x) + (a.y * p.normal.y) + (a.z * p.normal.z) + (a.w * p.normal.w);
@@ -216,7 +199,7 @@ Vec4d_t linePlaneIntersection(Vec4d_t a, Vec4d_t b, Plane_t p) {
     return i;
 }
 
-void projectMeshMatrix(std::vector<Tri4d_t>& Mesh){
+void projectMeshMatrix(std::vector<Tri4d_t>& Mesh){//projects the matrix according to the projection matrix...
     
     int i;
     for (i = 0; i < Mesh.size(); i++) {
@@ -226,7 +209,7 @@ void projectMeshMatrix(std::vector<Tri4d_t>& Mesh){
     }
 }
 
-std::vector<Tri3d_t> perspectiveDivide(std::vector<Tri4d_t> t) {
+std::vector<Tri3d_t> perspectiveDivide(std::vector<Tri4d_t> t) {//scales the coordinates in accordance to w
     std::vector<Tri3d_t> output;
     output.resize(t.size());
     int i;
@@ -247,7 +230,7 @@ std::vector<Tri3d_t> perspectiveDivide(std::vector<Tri4d_t> t) {
     return output;
 }
 
-std::vector<Tri2d_t> viewportTransformation(std::vector<Tri3d_t> t) {
+std::vector<Tri2d_t> viewportTransformation(std::vector<Tri3d_t> t) {//scales coordinates based on viewport size
     std::vector<Tri2d_t> output;
     output.resize(t.size());
     int i;
@@ -266,7 +249,7 @@ std::vector<Tri2d_t> viewportTransformation(std::vector<Tri3d_t> t) {
     return output;
 }
 
-void translateMesh(std::vector<Tri4d_t>& Mesh, Vec4d_t Transform) {
+void translateMesh(std::vector<Tri4d_t>& Mesh, Vec4d_t Transform) {//adds two matricies, for translation
     int i;
     for (i = 0; i < Mesh.size(); i++) {
         Mesh[i].v0.x += Transform.x;
@@ -283,7 +266,7 @@ void translateMesh(std::vector<Tri4d_t>& Mesh, Vec4d_t Transform) {
     }
 }
 
-void rotateMesh(std::vector<Tri4d_t>& Mesh, Vec4d_t Rotation) {
+void rotateMesh(std::vector<Tri4d_t>& Mesh, Vec4d_t Rotation) {//multiplies two matricies for rotation
     int i, j, k, l; //w doesnt change with rotation, no need to alter mult matrix since we dodge the 4th coordinate (w) with horrible pointer offset code
     Tri4d_t Rtri;
     float sinRZ = sin(Rotation.x);//alpha
@@ -313,15 +296,13 @@ void rotateMesh(std::vector<Tri4d_t>& Mesh, Vec4d_t Rotation) {
     }
 }
 
-void worldSpaceMesh(std::vector<Tri4d_t>& Mesh, MeshInstance_t Instance) {
-    //move a mesh based on its own position and rotation as an instance of a parent mesh
+void worldSpaceMesh(std::vector<Tri4d_t>& Mesh, MeshInstance_t Instance) {//move a mesh based on its own position and rotation as an instance of a parent mesh
     rotateMesh(Mesh, Instance.rot);
     translateMesh(Mesh, Instance.pos);
     
 }
 
-void cameraSpaceMesh(std::vector<Tri4d_t>& Mesh, Camera_t camera) {
-    //move the inverted position and rotation to the world scene
+void cameraSpaceMesh(std::vector<Tri4d_t>& Mesh, Camera_t camera) {//move the inverted position and rotation to the world scene
     Vec4d_t tPos = { -camera.position.x, -camera.position.y, -camera.position.z, -camera.position.w };
     Vec4d_t tRot = { -camera.rotation.x, -camera.rotation.y, -camera.rotation.z, -camera.rotation.w };
     rotateMesh(Mesh, tRot);
@@ -329,11 +310,10 @@ void cameraSpaceMesh(std::vector<Tri4d_t>& Mesh, Camera_t camera) {
     
 }
 
-int clipOrCull(MeshInstance_t mesh, Camera_t camera) {
-    /*transform and rotate only the bounding sphere coords not the entire mesh
-    if fully in = 8
-    if fully out = 8
-    if parial = -8 > x < 8*/
+int clipOrCull(MeshInstance_t mesh, Camera_t camera) {//early rejection of meshes based on set bounding box coordinates and clip plane inequalities
+  /*if fully in = 8
+    if fully out = 0
+    if parial = < 8 */
     int i;
     std::vector<Tri4d_t> tempBounds = mesh.parentMesh.boundBox;
     worldSpaceMesh(tempBounds, mesh);
@@ -342,12 +322,7 @@ int clipOrCull(MeshInstance_t mesh, Camera_t camera) {
     //we in clip space now
     int result = 0;
     for(i = 0; i < tempBounds.size(); i++){
-        if (tempBounds[i].v0.w <= 0) result;
-        /*if ((tempBounds[i].v0.x < -tempBounds[i].v0.w) || (tempBounds[i].v0.x > tempBounds[i].v0.w) ||
-            (tempBounds[i].v0.y < -tempBounds[i].v0.w) || (tempBounds[i].v0.y > tempBounds[i].v0.w) ||
-            (tempBounds[i].v0.z < -tempBounds[i].v0.w) || (tempBounds[i].v0.z > tempBounds[i].v0.w)) {
-            result += 1;//above test for outside, outside on any plane -> point is outside
-        }*/
+        if (tempBounds[i].v0.w <= 0) result;//axe this soon
         if ((tempBounds[i].v0.x >= -tempBounds[i].v0.w) && (tempBounds[i].v0.x <= tempBounds[i].v0.w) &&
             (tempBounds[i].v0.y >= -tempBounds[i].v0.w) && (tempBounds[i].v0.y <= tempBounds[i].v0.w) &&
             (tempBounds[i].v0.z >= -tempBounds[i].v0.w) && (tempBounds[i].v0.z <= tempBounds[i].v0.w)) {
@@ -357,7 +332,7 @@ int clipOrCull(MeshInstance_t mesh, Camera_t camera) {
     return result;
 }
 
-void clipTriangle(std::vector<Tri4d_t>& output, Tri4d_t input, Plane_t plane) {
+void clipTriangle(std::vector<Tri4d_t>& output, Tri4d_t input, Plane_t plane) {//clip and redraw triangles along a clipping plane
     Vec4d_t A, B, C, TA, TB, TC;
     float d0, d1, d2;
     d0 = signedDistance(plane, input.v0);
@@ -432,7 +407,7 @@ void clipTriangle(std::vector<Tri4d_t>& output, Tri4d_t input, Plane_t plane) {
     }
 }
 
-std::vector<Tri4d_t> clipMesh(std::vector<Tri4d_t>& mesh, Camera_t camera) {
+std::vector<Tri4d_t> clipMesh(std::vector<Tri4d_t>& mesh, Camera_t camera) {//handle passing a mesh through the clipper along all its planes without any data hazards
     int i, j;
     Vec4d_t A, B, C, TA, TB, TC;
     std::vector<Tri4d_t> cInput = mesh;
@@ -447,9 +422,7 @@ std::vector<Tri4d_t> clipMesh(std::vector<Tri4d_t>& mesh, Camera_t camera) {
     return cInput;
 }
 
-std::vector<Tri4d_t> rotTranClipMesh(struct MeshInstance_t mesh, struct Camera_t camera ) {
-    /*copy the triangle array, rotate and transform it and do whatever needed to trim it down and return another
-    array of triangles*/
+std::vector<Tri4d_t> rotTranClipMesh(struct MeshInstance_t mesh, struct Camera_t camera ) {//handles the entire clipping pipeline with a mesh and a camera
     int i, cResult;
     std::vector<Tri4d_t> clipped;
     cResult = clipOrCull(mesh, camera);
@@ -470,7 +443,7 @@ std::vector<Tri4d_t> rotTranClipMesh(struct MeshInstance_t mesh, struct Camera_t
     return clipped;
 }
 
-void drawLine(float x0, float y0, float x1, float y1) {
+void drawLine(float x0, float y0, float x1, float y1) {//bresenham line drawing between two points
     float x, y, dx, dy, step;
     int i;
     dx = (x1 - x0);
@@ -497,13 +470,13 @@ void drawLine(float x0, float y0, float x1, float y1) {
     }
 }
 
-void drawWireTri(Tri2d_t Tri) {
+void drawWireTri(Tri2d_t Tri) {//handles drawing three lines between verticies of a triangle
     drawLine(Tri.v0.x, Tri.v0.y, Tri.v1.x, Tri.v1.y);
     drawLine(Tri.v1.x, Tri.v1.y, Tri.v2.x, Tri.v2.y);
     drawLine(Tri.v2.x, Tri.v2.y, Tri.v0.x, Tri.v0.y);
 }
 
-void drawFullTri(Tri2d_t Tri, Uint32 Colour) {
+void drawFullTri(Tri2d_t Tri, Uint32 Colour) {//draws a filled in triangle of a set colour
     //swap so we get a nice y ordered tringle
     if (Tri.v1.y < Tri.v0.y) { swapVec2d_t(&Tri.v1, &Tri.v0); }
     if (Tri.v2.y < Tri.v0.y) { swapVec2d_t(&Tri.v2, &Tri.v0); }
@@ -542,7 +515,7 @@ void drawFullTri(Tri2d_t Tri, Uint32 Colour) {
     x_right.clear();
 }
  
-void drawShadedTri(Tri2d_t Tri, int Colour) {
+void drawShadedTri(Tri2d_t Tri, int Colour) {//draws a triangle with interpolated colour values corresponding to vx.h
     //swap so we get a nice y ordered tringle
     if (Tri.v1.y < Tri.v0.y) { swapVec2d_t(&Tri.v1, &Tri.v0); }
     if (Tri.v2.y < Tri.v0.y) { swapVec2d_t(&Tri.v2, &Tri.v0); }
@@ -632,7 +605,7 @@ bool update()
 
 float Loop = 1;
 
-void static setup_scene() {
+void static setup_scene() {//ran once to mesh meshes and instance instances
 
     std::vector<Tri4d_t> mesh1 = {
         // mesh origin (center at 0,0,0)
@@ -706,7 +679,7 @@ void static setup_scene() {
 
 }
 
-void render_scene(struct Scene_t scene) {
+void render_scene(struct Scene_t scene) {//rendering pipeline brought together
     int i, j;
     std::vector<Tri3d_t> tempProjected;
     for (i = 0; i < scene.meshInstanceCount; i++) {
