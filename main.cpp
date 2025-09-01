@@ -79,8 +79,7 @@ struct Plane_t {//for clipping planes etc
 struct Mesh_t {
     std::vector<Tri4d_t> Triangles;
     int triCount;
-    struct Vec3d_t boundCentre;
-    float boundRadius;
+    std::vector<Tri4d_t> boundBox;// 8 vertices but in a triangle due to how stuff is processed here
 };
 
 struct MeshInstance_t {
@@ -332,31 +331,30 @@ void cameraSpaceMesh(std::vector<Tri4d_t>& Mesh, Camera_t camera) {
 
 int clipOrCull(MeshInstance_t mesh, Camera_t camera) {
     /*transform and rotate only the bounding sphere coords not the entire mesh
-    if fully in = 0
-    if fully out = 1
-    if parial = 2*/
+    if fully in = 8
+    if fully out = 8
+    if parial = -8 > x < 8*/
     int i;
-    std::vector<Tri4d_t> tBC(1);
-    tBC[0].v0 = { mesh.parentMesh.boundCentre.x, mesh.parentMesh.boundCentre.y, mesh.parentMesh.boundCentre.z, 1 };
-    worldSpaceMesh(tBC, mesh);
-    cameraSpaceMesh(tBC, camera);
-    projectMeshMatrix(tBC);
-    float wRadius = mesh.parentMesh.boundRadius / tBC[0].v0.w;//this needs to be caluclated better in regards to z
+    std::vector<Tri4d_t> tempBounds = mesh.parentMesh.boundBox;
+    worldSpaceMesh(tempBounds, mesh);
+    cameraSpaceMesh(tempBounds, camera);
+    projectMeshMatrix(tempBounds);
     //we in clip space now
-    int result = 2;
-    float distance = 0;
-    if (tBC[0].v0.w <= 0) return 1;
-    if ((tBC[0].v0.x + wRadius < -tBC[0].v0.w) || (tBC[0].v0.x - wRadius > tBC[0].v0.w) ||
-        (tBC[0].v0.y + wRadius < -tBC[0].v0.w) || (tBC[0].v0.y - wRadius > tBC[0].v0.w) ||
-        (tBC[0].v0.z + wRadius < -tBC[0].v0.w) || (tBC[0].v0.z - wRadius > tBC[0].v0.w)) {
-        result = 1;//above test for outside, outside on any plane -> cull
+    int result = 0;
+    for(i = 0; i < tempBounds.size(); i++){
+        if (tempBounds[i].v0.w <= 0) result;
+        /*if ((tempBounds[i].v0.x < -tempBounds[i].v0.w) || (tempBounds[i].v0.x > tempBounds[i].v0.w) ||
+            (tempBounds[i].v0.y < -tempBounds[i].v0.w) || (tempBounds[i].v0.y > tempBounds[i].v0.w) ||
+            (tempBounds[i].v0.z < -tempBounds[i].v0.w) || (tempBounds[i].v0.z > tempBounds[i].v0.w)) {
+            result += 1;//above test for outside, outside on any plane -> point is outside
+        }*/
+        if ((tempBounds[i].v0.x >= -tempBounds[i].v0.w) && (tempBounds[i].v0.x <= tempBounds[i].v0.w) &&
+            (tempBounds[i].v0.y >= -tempBounds[i].v0.w) && (tempBounds[i].v0.y <= tempBounds[i].v0.w) &&
+            (tempBounds[i].v0.z >= -tempBounds[i].v0.w) && (tempBounds[i].v0.z <= tempBounds[i].v0.w)) {
+            result += 1;//above test for inside, inside on all planes -> point is inside
+        }
     }
-    if ((tBC[0].v0.x - wRadius >= -tBC[0].v0.w) && (tBC[0].v0.x + wRadius <= tBC[0].v0.w) &&
-        (tBC[0].v0.y - wRadius >= -tBC[0].v0.w) && (tBC[0].v0.y + wRadius <= tBC[0].v0.w) &&
-        (tBC[0].v0.z - wRadius >= -tBC[0].v0.w) && (tBC[0].v0.z + wRadius <= tBC[0].v0.w)) {
-        result = 0;//above test for inside, inside on all planes -> inside
-    }
-    return 2;
+    return result;
 }
 
 void clipTriangle(std::vector<Tri4d_t>& output, Tri4d_t input, Plane_t plane) {
@@ -455,7 +453,7 @@ std::vector<Tri4d_t> rotTranClipMesh(struct MeshInstance_t mesh, struct Camera_t
     int i, cResult;
     std::vector<Tri4d_t> clipped;
     cResult = clipOrCull(mesh, camera);
-    if (cResult == 1) {
+    if (cResult == 0) {//fully out
         std::vector<Tri4d_t> empty;
         return empty;
     }
@@ -463,10 +461,10 @@ std::vector<Tri4d_t> rotTranClipMesh(struct MeshInstance_t mesh, struct Camera_t
     worldSpaceMesh(processing, mesh);
     cameraSpaceMesh(processing, camera);
     projectMeshMatrix(processing);
-    if (cResult == 2) {
+    if (cResult < 8) {//partial
         clipped = clipMesh(processing, camera);
     }
-    else {
+    else {//fully in
         clipped = processing;
     }
     return clipped;
@@ -672,8 +670,16 @@ void static setup_scene() {
     struct Mesh_t cubeCube;
     cubeCube.Triangles = mesh1;
     cubeCube.triCount = mesh1.size();
-    cubeCube.boundCentre = { 150,150,150 };
-    cubeCube.boundRadius = 75;
+    cubeCube.boundBox = {
+        {{-50,-50,-50}},
+        {{-50,-50,50}},
+        {{-50,50,-50}},
+        {{-50,50,50}},
+        {{50,-50,-50}},
+        {{50,-50,50}},
+        {{50,50,-50}},
+        {{50,50,50}}
+    };
 
     struct MeshInstance_t mesh1Instance1;
     mesh1Instance1.parentMesh = cubeCube;
@@ -730,7 +736,7 @@ void render(Uint64 aTicks)/*does the funny rendering*/
     rendererScene.meshInstances[0].rot.x += 0.01;
     rendererScene.meshInstances[1].rot.y += 0.01;
     rendererScene.meshInstances[2].rot.z += 0.01;
-    //rendererScene.meshInstances[0].pos.z -= 5;
+    rendererScene.meshInstances[1].pos.z += 1;
     render_scene(rendererScene);
    
 }
