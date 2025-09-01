@@ -14,9 +14,9 @@ SDL_Window* gSDLWindow;
 SDL_Renderer* gSDLRenderer; 
 SDL_Texture* gSDLTexture;
 static int gDone;
-const int WINDOW_WIDTH = 1920 / 2;
-const int WINDOW_HEIGHT = 1080 / 2;
-const float FOV = 120.0f * 3.14159f / 180.0f;//60 degree fov
+const int WINDOW_WIDTH = 1920;
+const int WINDOW_HEIGHT = 1080;
+const float FOV = 90.0f * 3.14159f / 180.0f;//60 degree fov
 const double F = 1.0f / tan(FOV / 2.0f);
 const float ASPECT_RATIO = (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT;
 const int NEAR = 10;
@@ -24,7 +24,7 @@ const int FAR = 1000;
 const float projectionMatrix[4][4] = {
     {F / ASPECT_RATIO, 0, 0, 0},
     {0, F, 0, 0},
-    {0, 0, (FAR + NEAR) / (NEAR - FAR), (2 * FAR * NEAR) / (NEAR - FAR)},
+    {0, 0, -((FAR + NEAR) / (NEAR - FAR)), -((2 * FAR * NEAR) / (NEAR - FAR))},
     {0, 0, -1, 0}
 };
 const SDL_PixelFormatDetails* PIXELFORMAT = SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA8888);
@@ -57,7 +57,7 @@ struct Vec3d_t{
 
 struct Vec2d_t {
     float x, y = 0.0;
-    float h = 0.0;
+    float h = 1.0;
 };
 
 struct Tri4d_t{ //we only create these ones
@@ -85,9 +85,9 @@ struct Mesh_t {
 
 struct MeshInstance_t {
     struct Mesh_t parentMesh;
-    struct Vec4d_t pos;
-    struct Vec4d_t rot;
-    struct Vec4d_t scl;
+    struct Vec4d_t pos = { 0,0,0 };
+    struct Vec4d_t rot = { 0,0,0 };
+    struct Vec4d_t scl = { 1,1,1 };
 };
 
 struct Camera_t {
@@ -98,8 +98,8 @@ struct Camera_t {
         {Vec4d_t{-1.0, 0.0, 0.0, 1.0}}, //right
         {Vec4d_t{0.0, 1.0, 0.0, 1.0}},//bottom
         {Vec4d_t{0.0, -1.0, 0.0, 1.0}},//top 
-        {Vec4d_t{0.0, 0.0, 1.0, 1.0}}, //near
-        {Vec4d_t{0.0, 0.0, -1.0, 1.0}} //far
+        {Vec4d_t{0.0, 0.0, -1.0, 1.0}}, //near
+        {Vec4d_t{0.0, 0.0, 1.0, 1.0}} //far
     };
 };
 
@@ -259,6 +259,10 @@ std::vector<Tri2d_t> viewportTransformation(std::vector<Tri3d_t> t) {
         output[i].v1.y = (1 - t[i].v1.y) / 2 * WINDOW_HEIGHT;
         output[i].v2.x = (t[i].v2.x + 1) / 2 * WINDOW_WIDTH;
         output[i].v2.y = (1 - t[i].v2.y) / 2 * WINDOW_HEIGHT;
+
+        output[i].v0.h = -t[i].v0.z / 2;
+        output[i].v1.h = -t[i].v1.z / 2;
+        output[i].v2.h = -t[i].v2.z / 2;
     }
     return output;
 }
@@ -310,8 +314,20 @@ void rotateMesh(std::vector<Tri4d_t>& Mesh, Vec4d_t Rotation) {
     }
 }
 
-void cameraSpace(std::vector<Tri4d_t>& Mesh, Camera_t camera) {
+void worldSpaceMesh(std::vector<Tri4d_t>& Mesh, MeshInstance_t Instance) {
+    //move a mesh based on its own position and rotation as an instance of a parent mesh
+    rotateMesh(Mesh, Instance.rot);
+    translateMesh(Mesh, Instance.pos);
+    
+}
+
+void cameraSpaceMesh(std::vector<Tri4d_t>& Mesh, Camera_t camera) {
     //move the inverted position and rotation to the world scene
+    Vec4d_t tPos = { -camera.position.x, -camera.position.y, -camera.position.z, -camera.position.w };
+    Vec4d_t tRot = { -camera.rotation.x, -camera.rotation.y, -camera.rotation.z, -camera.rotation.w };
+    rotateMesh(Mesh, tRot);
+    translateMesh(Mesh, tPos);
+    
 }
 
 int clipOrCull(MeshInstance_t mesh, Camera_t camera) {
@@ -322,12 +338,10 @@ int clipOrCull(MeshInstance_t mesh, Camera_t camera) {
     int i;
     std::vector<Tri4d_t> tBC(1);
     tBC[0].v0 = { mesh.parentMesh.boundCentre.x, mesh.parentMesh.boundCentre.y, mesh.parentMesh.boundCentre.z, 1 };
-    rotateMesh(tBC, mesh.rot);
-    translateMesh(tBC, mesh.pos);
-    rotateMesh(tBC, camera.rotation);
-    translateMesh(tBC, camera.position);    
+    worldSpaceMesh(tBC, mesh);
+    cameraSpaceMesh(tBC, camera);
     projectMeshMatrix(tBC);
-    float wRadius = mesh.parentMesh.boundRadius / tBC[0].v0.w;
+    float wRadius = mesh.parentMesh.boundRadius / tBC[0].v0.w;//this needs to be caluclated better in regards to z
     //we in clip space now
     int result = 2;
     float distance = 0;
@@ -342,7 +356,7 @@ int clipOrCull(MeshInstance_t mesh, Camera_t camera) {
         (tBC[0].v0.z - wRadius >= -tBC[0].v0.w) && (tBC[0].v0.z + wRadius <= tBC[0].v0.w)) {
         result = 0;//above test for inside, inside on all planes -> inside
     }
-    return result;
+    return 2;
 }
 
 void clipTriangle(std::vector<Tri4d_t>& output, Tri4d_t input, Plane_t plane) {
@@ -446,12 +460,8 @@ std::vector<Tri4d_t> rotTranClipMesh(struct MeshInstance_t mesh, struct Camera_t
         return empty;
     }
     std::vector<Tri4d_t> processing = mesh.parentMesh.Triangles;
-    rotateMesh(processing, mesh.rot);
-    translateMesh(processing, mesh.pos);
-    for (i = 0; i < mesh.parentMesh.triCount; i++) {
-        addTri4d_tVec4d_t(&processing[i], &camera.position);
-    }
-    rotateMesh(processing, camera.rotation);
+    worldSpaceMesh(processing, mesh);
+    cameraSpaceMesh(processing, camera);
     projectMeshMatrix(processing);
     if (cResult == 2) {
         clipped = clipMesh(processing, camera);
@@ -627,32 +637,35 @@ float Loop = 1;
 void static setup_scene() {
 
     std::vector<Tri4d_t> mesh1 = {
-        // bound centre
-        {{150,150,150,1}, {150,150,150,1}, {150,150,150,1}},
+        // mesh origin (center at 0,0,0)
+        {{0,0,0,1}, {0,0,0,1}, {0,0,0,1}},
 
-        // Front face (z = 200)
-        {{100,100,200,1}, {200,100,200,1}, {200,200,200,1}},
-        {{100,100,200,1}, {200,200,200,1}, {100,200,200,1}},
+        // bound centre (also at origin now)
+        {{0,0,0,1}, {0,0,0,1}, {0,0,0,1}},
 
-        // Back face (z = 100)
-        {{100,100,100,1}, {200,200,100,1}, {200,100,100,1}},
-        {{100,100,100,1}, {100,200,100,1}, {200,200,100,1}},
+        // Front face (z = +50)
+        {{-50,-50, 50,1}, { 50,-50, 50,1}, { 50, 50, 50,1}},
+        {{-50,-50, 50,1}, { 50, 50, 50,1}, {-50, 50, 50,1}},
 
-        // Left face (x = 100)
-        {{100,100,100,1}, {100,100,200,1}, {100,200,200,1}},
-        {{100,100,100,1}, {100,200,200,1}, {100,200,100,1}},
+        // Back face (z = -50)
+        {{-50,-50,-50,1}, { 50, 50,-50,1}, { 50,-50,-50,1}},
+        {{-50,-50,-50,1}, {-50, 50,-50,1}, { 50, 50,-50,1}},
 
-        // Right face (x = 200)
-        {{200,100,100,1}, {200,200,200,1}, {200,100,200,1}},
-        {{200,100,100,1}, {200,200,100,1}, {200,200,200,1}},
+        // Left face (x = -50)
+        {{-50,-50,-50,1}, {-50,-50, 50,1}, {-50, 50, 50,1}},
+        {{-50,-50,-50,1}, {-50, 50, 50,1}, {-50, 50,-50,1}},
 
-        // Top face (y = 200)
-        {{100,200,100,1}, {100,200,200,1}, {200,200,200,1}},
-        {{100,200,100,1}, {200,200,200,1}, {200,200,100,1}},
+        // Right face (x = +50)
+        {{ 50,-50,-50,1}, { 50, 50, 50,1}, { 50,-50, 50,1}},
+        {{ 50,-50,-50,1}, { 50, 50,-50,1}, { 50, 50, 50,1}},
 
-        // Bottom face (y = 100)
-        {{100,100,100,1}, {200,100,200,1}, {100,100,200,1}},
-        {{100,100,100,1}, {200,100,100,1}, {200,100,200,1}},
+        // Top face (y = +50)
+        {{-50, 50,-50,1}, {-50, 50, 50,1}, { 50, 50, 50,1}},
+        {{-50, 50,-50,1}, { 50, 50, 50,1}, { 50, 50,-50,1}},
+
+        // Bottom face (y = -50)
+        {{-50,-50,-50,1}, { 50,-50, 50,1}, {-50,-50, 50,1}},
+        {{-50,-50,-50,1}, { 50,-50,-50,1}, { 50,-50, 50,1}},
     };
 
 
@@ -662,19 +675,27 @@ void static setup_scene() {
     cubeCube.boundCentre = { 150,150,150 };
     cubeCube.boundRadius = 75;
 
-    struct MeshInstance_t mesh1Instance;
-    mesh1Instance.parentMesh = cubeCube;
-    mesh1Instance.pos = { 0,0,0 };
-    mesh1Instance.rot = { 0,0,0 };
-    mesh1Instance.scl = { 1,1,1 };
+    struct MeshInstance_t mesh1Instance1;
+    mesh1Instance1.parentMesh = cubeCube;
+    mesh1Instance1.pos = { 0,0,0 };
+
+    struct MeshInstance_t mesh1Instance2;
+    mesh1Instance2.parentMesh = cubeCube;
+    mesh1Instance2.pos = { -150,0,0 };
+
+    struct MeshInstance_t mesh1Instance3;
+    mesh1Instance3.parentMesh = cubeCube;
+    mesh1Instance3.pos = { 150,0,0 };
     
 
     struct Camera_t camera;
-    camera.position = { -180,-180,-300 };
+    camera.position = { 0,0,300 };//by default facing down -Z
     camera.rotation = { 0,0,0 };
 
-    rendererScene.meshInstances.push_back(mesh1Instance);
-    rendererScene.meshInstanceCount = 1;
+    rendererScene.meshInstances.push_back(mesh1Instance1);
+    rendererScene.meshInstances.push_back(mesh1Instance2);
+    rendererScene.meshInstances.push_back(mesh1Instance3);
+    rendererScene.meshInstanceCount = 3;
     rendererScene.camera = camera;
 
 }
@@ -686,6 +707,9 @@ void render_scene(struct Scene_t scene) {
         std::vector<Tri4d_t> tempTri = rotTranClipMesh(scene.meshInstances[i], scene.camera);
         tempProjected = perspectiveDivide(tempTri);
         std::vector<Tri2d_t> tempScreen = viewportTransformation(tempProjected);
+        for (j = 0; j < tempScreen.size(); j++) {
+            drawShadedTri(tempScreen[j], 0xff0000ff);
+        }
         for (j = 0; j < tempScreen.size(); j++) {
             drawWireTri(tempScreen[j]);
         }
@@ -703,10 +727,10 @@ void render(Uint64 aTicks)/*does the funny rendering*/
             gFrameBuffer[c] = 0x000000ff;
         }
     }
-    //rendererScene.meshInstances[0].rot.x += 0.001;
-    rendererScene.meshInstances[0].rot.y += 0.001;
-    rendererScene.meshInstances[0].rot.z += 0.001;
-    //rendererScene.meshInstances[0].pos.z += 0.1;
+    rendererScene.meshInstances[0].rot.x += 0.01;
+    rendererScene.meshInstances[1].rot.y += 0.01;
+    rendererScene.meshInstances[2].rot.z += 0.01;
+    //rendererScene.meshInstances[0].pos.z -= 5;
     render_scene(rendererScene);
    
 }
