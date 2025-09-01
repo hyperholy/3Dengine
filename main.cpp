@@ -9,13 +9,14 @@
 #include "SDL3/SDL.h"
 #include "SDL3/SDL_main.h"
 
-int* gFrameBuffer;
 SDL_Window* gSDLWindow;
 SDL_Renderer* gSDLRenderer; 
 SDL_Texture* gSDLTexture;
 static int gDone;
 const int WINDOW_WIDTH = 1920;
 const int WINDOW_HEIGHT = 1080;
+int* gFrameBuffer;
+int* zBuffer;
 const float FOV = 90.0f * 3.14159f / 180.0f;//60 degree fov
 const double F = 1.0f / tan(FOV / 2.0f);
 const float ASPECT_RATIO = (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT;
@@ -31,19 +32,10 @@ const SDL_PixelFormatDetails* PIXELFORMAT = SDL_GetPixelFormatDetails(SDL_PIXELF
 
 
 /*
-Mesh -> instances (have indiv pos, rot, scale)
-Scene with multiple instanced meshes with their rot scale pos etc
-add in camera pos and rot
-pos and rot calculations applied to boundCentre to check if the object is either; fully in view, partially clipped or fully clipped
-one by one each instance goes into a clip function and spits out a clipped version that is rendered immediatly and freed, and so on
-scene is rendered
-kill scene
-Clip triangles against near plane in camera space (z >= NEAR).
-Clip triangles against near plane in camera space (z >= NEAR).
-Clip triangles against near plane in camera space (z >= NEAR).
-Clip triangles against near plane in camera space (z >= NEAR).
-Clip triangles against near plane in camera space (z >= NEAR).
-cliporcull with a bounding rectangle instead of a bounding point
+TODO
+hidden surface removal
+shading
+textures
 */
 
 struct Vec4d_t {
@@ -55,9 +47,10 @@ struct Vec3d_t{
     float x, y, z = 0.0;
 }; 
 
-struct Vec2d_t {
+struct VecP_t {//projected vertex in screenspace
     float x, y = 0.0;
-    float h = 1.0;
+    float h = 1.0;//colour multiplier
+    float z = 0.0;//for the z buffer
 };
 
 struct Tri4d_t{ //we only create these ones
@@ -68,8 +61,8 @@ struct Tri3d_t {
     struct Vec3d_t v0, v1, v2;
 };
 
-struct Tri2d_t { //for projected 3d triangles
-    struct Vec2d_t v0, v1, v2;
+struct Tri2d_t { //for viewport 3d triangles
+    struct VecP_t v0, v1, v2;
 };
 
 struct Plane_t {//for clipping planes etc
@@ -111,19 +104,30 @@ struct Scene_t {//a scene is a bunch of instances of meshes and a camera
 /*global variable scene*/
 Scene_t rendererScene;
 
-void swapVec2d_t(Vec2d_t* a, Vec2d_t* b) {//in go pointer to passed thingy so it doesnt need wierd returning, swap(&a, &b); )
-    Vec2d_t temp = *a;
+void swapVec2d_t(VecP_t* a, VecP_t* b) {//in go pointer to passed thingy so it doesnt need wierd returning, swap(&a, &b); )
+    VecP_t temp = *a;
     *a = *b;
     *b = temp;
 }
 
 int setPixel(int X, int Y, Uint32 Colour) {//sets a pixel in the frame buffer to a colour, w/ some limits to avoid index errors
     if (Y == 0) Y++; if (X == 0) X++;
-    if (X <= 0 || X > WINDOW_WIDTH - 1) return -1;
-    if (Y <= 0 || Y > WINDOW_HEIGHT - 1) return -1;
+    if (X < 0 || X > WINDOW_WIDTH - 1)
+        return -1;
+    if (Y < 0 || Y > WINDOW_HEIGHT - 1)
+        return -1;
     
     gFrameBuffer[X + ((Y - 1) * WINDOW_WIDTH)] = Colour;
     return 1;
+}
+
+int setZPixel(int x, int y, int z, Uint32 Colour) {//z will be inverted as 1/z
+    if (z > zBuffer[x + (y * WINDOW_WIDTH)]) {
+        setPixel(x, y, Colour);
+        zBuffer[x + (y * WINDOW_WIDTH)] = z;
+        return 1;
+    }
+    return 0;
 }
 
 void interpolatei(std::vector<int> &values, float i0, float d0, float i1, float d1){//pass in a vector interpolates whole integers
@@ -599,7 +603,7 @@ bool update()
     SDL_UnlockTexture(gSDLTexture);
     SDL_RenderTexture(gSDLRenderer, gSDLTexture, NULL, NULL);
     SDL_RenderPresent(gSDLRenderer);
-    SDL_Delay(1);
+    SDL_Delay(1);//this eats 3 frames per second : (
     return true;
 }
 
