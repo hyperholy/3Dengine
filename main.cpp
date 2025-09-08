@@ -16,12 +16,12 @@ static int gDone;
 const int WINDOW_WIDTH = 1920;
 const int WINDOW_HEIGHT = 1080;
 int* gFrameBuffer;
-int* zBuffer;
+float* zBuffer;
 const float FOV = 90.0f * 3.14159f / 180.0f;//60 degree fov
 const double F = 1.0f / tan(FOV / 2.0f);
 const float ASPECT_RATIO = (float)WINDOW_WIDTH / (float)WINDOW_HEIGHT;
 const int NEAR = 10;
-const int FAR = 1000;
+const int FAR = 2000;
 const float projectionMatrix[4][4] = {
     {F / ASPECT_RATIO, 0, 0, 0},
     {0, F, 0, 0},
@@ -121,10 +121,11 @@ int setPixel(int X, int Y, Uint32 Colour) {//sets a pixel in the frame buffer to
     return 1;
 }
 
-int setZPixel(int x, int y, int z, Uint32 Colour) {//z will be inverted as 1/z
-    if (z > zBuffer[x + (y * WINDOW_WIDTH)]) {
+int setZPixel(int x, int y, float z, Uint32 Colour) {//z will be inverted as 1/z
+    if (y == 0) y++; if (x == 0) x++;
+    if (z > zBuffer[x + ((y - 1) * WINDOW_WIDTH)]) {
         setPixel(x, y, Colour);
-        zBuffer[x + (y * WINDOW_WIDTH)] = z;
+        zBuffer[x + ((y - 1) * WINDOW_WIDTH)] = z;
         return 1;
     }
     return 0;
@@ -238,6 +239,7 @@ std::vector<Tri2d_t> viewportTransformation(std::vector<Tri3d_t> t) {//scales co
     std::vector<Tri2d_t> output;
     output.resize(t.size());
     int i;
+    float sum = 0;
     for (i = 0; i < t.size(); i++) {
         output[i].v0.x = (t[i].v0.x + 1) / 2 * WINDOW_WIDTH; 
         output[i].v0.y = (1 - t[i].v0.y) / 2 * WINDOW_HEIGHT;
@@ -246,10 +248,14 @@ std::vector<Tri2d_t> viewportTransformation(std::vector<Tri3d_t> t) {//scales co
         output[i].v2.x = (t[i].v2.x + 1) / 2 * WINDOW_WIDTH;
         output[i].v2.y = (1 - t[i].v2.y) / 2 * WINDOW_HEIGHT;
 
-        output[i].v0.h = -t[i].v0.z / 2;
-        output[i].v1.h = -t[i].v1.z / 2;
-        output[i].v2.h = -t[i].v2.z / 2;
+        output[i].v0.z = (1 / -t[i].v0.z);
+        output[i].v1.z = (1 / -t[i].v1.z);
+        output[i].v2.z = (1 / -t[i].v2.z);
+        sum += output[i].v0.z;
+        sum += output[i].v1.z;
+        sum += output[i].v2.z;
     }
+    sum = sum / (t.size() * 3);
     return output;
 }
 
@@ -480,7 +486,7 @@ void drawWireTri(Tri2d_t Tri) {//handles drawing three lines between verticies o
     drawLine(Tri.v2.x, Tri.v2.y, Tri.v0.x, Tri.v0.y);
 }
 
-void drawFullTri(Tri2d_t Tri, Uint32 Colour) {//draws a filled in triangle of a set colour
+void drawFullTri(Tri2d_t Tri, Uint32 Colour) {//draws a filled in triangle of a set colour, no zbuffering im lazy
     //swap so we get a nice y ordered tringle
     if (Tri.v1.y < Tri.v0.y) { swapVec2d_t(&Tri.v1, &Tri.v0); }
     if (Tri.v2.y < Tri.v0.y) { swapVec2d_t(&Tri.v2, &Tri.v0); }
@@ -526,18 +532,23 @@ void drawShadedTri(Tri2d_t Tri, int Colour) {//draws a triangle with interpolate
     if (Tri.v2.y < Tri.v1.y) { swapVec2d_t(&Tri.v2, &Tri.v1); }
     std::vector<int> x01, x12, x02, x012, x_left, x_right;
     std::vector<float> h01, h12, h02, h012, h_segment, h_right, h_left;
+    std::vector<float> z01, z12, z02, z012, z_segment, z_right, z_left;
     //generates three arrays of every x value that lies on the triangle edges
     interpolatei(x01, Tri.v0.y, Tri.v0.x, Tri.v1.y, Tri.v1.x);
     interpolatef(h01, Tri.v0.y, Tri.v0.h, Tri.v1.y, Tri.v1.h);
+    interpolatef(z01, Tri.v0.y, Tri.v0.z, Tri.v1.y, Tri.v1.z);
 
     interpolatei(x12, Tri.v1.y, Tri.v1.x, Tri.v2.y, Tri.v2.x);
     interpolatef(h12, Tri.v1.y, Tri.v1.h, Tri.v2.y, Tri.v2.h);
+    interpolatef(z12, Tri.v1.y, Tri.v1.z, Tri.v2.y, Tri.v2.z);
 
     interpolatei(x02, Tri.v0.y, Tri.v0.x, Tri.v2.y, Tri.v2.x);
     interpolatef(h02, Tri.v0.y, Tri.v0.h, Tri.v2.y, Tri.v2.h);
+    interpolatef(z02, Tri.v0.y, Tri.v0.z, Tri.v2.y, Tri.v2.z);
 
     if(x01.size() != 0){ x01.pop_back(); }
     if(h01.size() != 0){ h01.pop_back(); }
+    if(z01.size() != 0){ z01.pop_back(); }
     
     x012.reserve(x01.size() + x12.size());
     x012.insert(x012.end(), x01.begin(), x01.end());
@@ -546,19 +557,28 @@ void drawShadedTri(Tri2d_t Tri, int Colour) {//draws a triangle with interpolate
     h012.reserve(h01.size() + h12.size());
     h012.insert(h012.end(), h01.begin(), h01.end());
     h012.insert(h012.end(), h12.begin(), h12.end());
+
+    z012.reserve(z01.size() + z12.size());
+    z012.insert(z012.end(), z01.begin(), z01.end());
+    z012.insert(z012.end(), z12.begin(), z12.end());
+
     //find which is to the left or right
     int m = floor(x02.size() / 2);
     if (x02[m] < x012[m]) {
         x_left = x02;
         h_left = h02;
+        z_left = z02;
         x_right = x012;
         h_right = h012;
+        z_right = z012;
     }
     else {
         x_left = x012;
         h_left = h012;
+        z_left = z012;
         x_right = x02;
         h_right = h02;
+        z_right = z02;
     }
     //actual drawing
     int y, x, xmod, ymod, x_l, x_r, shaded_colour;
@@ -566,16 +586,18 @@ void drawShadedTri(Tri2d_t Tri, int Colour) {//draws a triangle with interpolate
         x_l = x_left[y - Tri.v0.y];
         x_r = x_right[y - Tri.v0.y];
         interpolatef(h_segment, x_l, h_left[y - Tri.v0.y], x_r, h_right[y - Tri.v0.y]);
+        interpolatef(z_segment, x_l, z_left[y - Tri.v0.y], x_r, z_right[y - Tri.v0.y]);
         y = y;
         for (x = x_l; x <= x_r; x++) {
             shaded_colour = multiplyColour(Colour, h_segment[x - x_l]);
             shaded_colour = shaded_colour | 0x000000ff;
-            setPixel(x, y, shaded_colour);
+            setZPixel(x, y, z_segment[x - x_l], shaded_colour);
         }
         h_segment.clear();
     }
     x01.clear(); x12.clear(); x02.clear(); x012.clear(); x_left.clear(); x_right.clear();
-    h02.clear(); x12.clear(); h02.clear(); h012.clear(); x_left.clear(); h_right.clear();
+    h02.clear(); h12.clear(); h02.clear(); h012.clear(); h_left.clear(); h_right.clear();
+    z02.clear(); z12.clear(); z02.clear(); z012.clear(); z_left.clear(); z_right.clear();
 }
 
 bool update()
@@ -664,11 +686,11 @@ void static setup_scene() {//ran once to mesh meshes and instance instances
 
     struct MeshInstance_t mesh1Instance2;
     mesh1Instance2.parentMesh = cubeCube;
-    mesh1Instance2.pos = { -150,0,0 };
+    mesh1Instance2.pos = { -25,0,-250 };
 
-    struct MeshInstance_t mesh1Instance3;
-    mesh1Instance3.parentMesh = cubeCube;
-    mesh1Instance3.pos = { 150,0,0 };
+    //struct MeshInstance_t mesh1Instance3;
+    //mesh1Instance3.parentMesh = cubeCube;
+    //mesh1Instance3.pos = { 150,0,0 };
     
 
     struct Camera_t camera;
@@ -677,8 +699,8 @@ void static setup_scene() {//ran once to mesh meshes and instance instances
 
     rendererScene.meshInstances.push_back(mesh1Instance1);
     rendererScene.meshInstances.push_back(mesh1Instance2);
-    rendererScene.meshInstances.push_back(mesh1Instance3);
-    rendererScene.meshInstanceCount = 3;
+    //rendererScene.meshInstances.push_back(mesh1Instance3);
+    rendererScene.meshInstanceCount = rendererScene.meshInstances.size();
     rendererScene.camera = camera;
 
 }
@@ -691,10 +713,10 @@ void render_scene(struct Scene_t scene) {//rendering pipeline brought together
         tempProjected = perspectiveDivide(tempTri);
         std::vector<Tri2d_t> tempScreen = viewportTransformation(tempProjected);
         for (j = 0; j < tempScreen.size(); j++) {
-            drawShadedTri(tempScreen[j], 0xff0000ff);
+            drawShadedTri(tempScreen[j], (multiplyColour(0x110000ff, j)));
         }
         for (j = 0; j < tempScreen.size(); j++) {
-            drawWireTri(tempScreen[j]);
+            //drawWireTri(tempScreen[j]);
         }
         tempTri.clear(); tempProjected.clear(); tempScreen.clear();
     }
@@ -710,9 +732,17 @@ void render(Uint64 aTicks)/*does the funny rendering*/
             gFrameBuffer[c] = 0x000000ff;
         }
     }
-    rendererScene.meshInstances[0].rot.x += 0.01;
-    rendererScene.meshInstances[1].rot.y += 0.01;
-    rendererScene.meshInstances[2].rot.z += 0.01;
+
+    for (int i = 0, c = 0; i < WINDOW_HEIGHT; i++)
+    {
+        for (int j = 0; j < WINDOW_WIDTH; j++, c++)
+        {
+            zBuffer[c] = -FAR;
+        }
+    }
+    rendererScene.meshInstances[0].rot.x += .01;
+    rendererScene.meshInstances[0].rot.y += .01;
+    rendererScene.meshInstances[0].rot.z += .01;
     rendererScene.meshInstances[1].pos.z += 1;
     render_scene(rendererScene);
    
@@ -741,6 +771,7 @@ int main(int argc, char** argv)
     }
 
     gFrameBuffer = new int[WINDOW_WIDTH * WINDOW_HEIGHT];
+    zBuffer = new float[WINDOW_WIDTH * WINDOW_HEIGHT];
     gSDLWindow = SDL_CreateWindow("SDL3 window", WINDOW_WIDTH, WINDOW_HEIGHT, 0);
     gSDLRenderer = SDL_CreateRenderer(gSDLWindow, NULL);
     gSDLTexture = SDL_CreateTexture(gSDLRenderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, WINDOW_WIDTH, WINDOW_HEIGHT);
