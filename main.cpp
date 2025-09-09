@@ -13,8 +13,8 @@ SDL_Window* gSDLWindow;
 SDL_Renderer* gSDLRenderer; 
 SDL_Texture* gSDLTexture;
 static int gDone;
-const int WINDOW_WIDTH = 1920 / 2;
-const int WINDOW_HEIGHT = 1080 / 2;
+const int WINDOW_WIDTH = 1920;
+const int WINDOW_HEIGHT = 1080;
 int* gFrameBuffer;
 double* zBuffer;
 const float FOV = 90.0f * 3.14159f / 180.0f;//60 degree fov
@@ -33,8 +33,12 @@ const SDL_PixelFormatDetails* PIXELFORMAT = SDL_GetPixelFormatDetails(SDL_PIXELF
 
 /*
 TODO
-zbuffer - needs some work
+19-30fps
+53-84fps
+use bitshifts for colour mult
+better early rejection for h_segment where its all 1.0
 hidden surface removal
+occulision culling
 shading
 textures
 */
@@ -125,57 +129,65 @@ int setPixel(int X, int Y, Uint32 Colour) {//sets a pixel in the frame buffer to
 
 int setZPixel(int x, int y, double z, Uint32 Colour) {//z will be inverted as 1/z
     if (y == 0) y++; if (x == 0) x++;
-    if (z > (zBuffer[x + ((y - 1) * WINDOW_WIDTH)]) + FLT_EPSILON) {
+    int pos = x + ((y - 1) * WINDOW_WIDTH);
+    if (z > (zBuffer[pos]) + FLT_EPSILON) {
         setPixel(x, y, Colour);
-        zBuffer[x + ((y - 1) * WINDOW_WIDTH)] = z;
+        zBuffer[pos] = z;
         return 1;
     }
     return 0;
 }
 
-void interpolatei(std::vector<int> &values, float i0, float d0, float i1, float d1){//pass in a vector interpolates whole integers
+void interpolatei(std::vector<int> &values, int i0, float d0, int i1, float d1){//pass in a vector interpolates whole integers
     if (i0 == i1) {
         values.clear();
         values.push_back(d0);
     }
+    size_t size = abs(i1 - i0) + 1;
+    values.resize(size);
     float a = (d1 - d0) / (i1 - i0);
     float d = d0;
-    int i;
-    for (i = i0; i <= i1; i++) {
-        values.push_back(d);
+    int i, j;
+    for (i = i0, j = 0; i <= (int) i1; i++, j++) {
+        values[j] = d;
         d += a;
     }
 }
 
-void interpolatef(std::vector<float> &values, float i0, float d0, float i1, float d1) {//pass in a vector interpolates floats
+void interpolatef(std::vector<float> &values, int i0, float d0, int i1, float d1) {//pass in a vector interpolates floats
     if (i0 == i1) {
         values.clear();
         values.push_back(d0);
     }
+    size_t size = abs(i1 - i0) + 1;
+    values.resize(size);
     float a = (d1 - d0) / (i1 - i0);
     float d = d0;
-    int i;
-    for (i = i0; i <= i1; i++) {
-        values.push_back(d);
+    int i, j;
+    for (i = i0, j = 0; i <= (int) i1; i++, j++) {
+        values[j] = d;
         d += a;
     }
 }
 
-void interpolated(std::vector<double>& values, double i0, double d0, double i1, double d1) {//pass in a vector interpolates floats
+void interpolated(std::vector<double>& values, int i0, double d0, int i1, double d1) {//pass in a vector interpolates doubles
     if (i0 == i1) {
         values.clear();
         values.push_back(d0);
     }
+    size_t size = abs(i1 - i0) + 1;
+    values.resize(size);
     double a = (d1 - d0) / (i1 - i0);
     double d = d0;
-    int i;
-    for (i = i0; i <= i1; i++) {
-        values.push_back(d);
+    int i, j;
+    for (i = i0, j = 0; i <= (int) i1; i++, j++) {
+        values[j] = d;
         d += a;
     }
 }
 
 Uint32 multiplyColour(Uint32 colour1, float n) {//multiplies two colours based off RGBA format
+    if (n == 1) return colour1;
     Uint8 r1, g1, b1, a1;
     SDL_GetRGBA(colour1, PIXELFORMAT, NULL, &r1, &g1, &b1, &a1);
     Uint8 r = (r1 * n);
@@ -740,27 +752,19 @@ void render_scene(struct Scene_t scene) {//rendering pipeline brought together
 
 void render(Uint64 aTicks)/*does the funny rendering*/
 {
-    for (int i = 0, c = 0; i < WINDOW_HEIGHT; i++)//    bg black
+    for (int i = 0, c = 0; i < WINDOW_HEIGHT; i++)//    bg black and zbuffer
     {
         for (int j = 0; j < WINDOW_WIDTH; j++, c++)
         {
             gFrameBuffer[c] = 0x000000ff;
-        }
-    }
-
-    for (int i = 0, c = 0; i < WINDOW_HEIGHT; i++)
-    {
-        for (int j = 0; j < WINDOW_WIDTH; j++, c++)
-        {
             zBuffer[c] = -FAR;
         }
     }
     rendererScene.meshInstances[0].rot.x += .01;
     rendererScene.meshInstances[0].rot.y += .01;
     rendererScene.meshInstances[0].rot.z += .01;
-    //rendererScene.meshInstances[1].pos.z += 1;
     rendererScene.meshInstances[1].rot.y += .01;
-    rendererScene.camera.rotation.y += 0.01;
+    //rendererScene.camera.rotation.y += 0.01;
     render_scene(rendererScene);
    
 }
