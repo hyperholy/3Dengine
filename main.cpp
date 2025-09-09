@@ -33,11 +33,9 @@ const SDL_PixelFormatDetails* PIXELFORMAT = SDL_GetPixelFormatDetails(SDL_PIXELF
 
 /*
 TODO
-19-30fps
-53-84fps
+30fps -> 90fps
 use bitshifts for colour mult
 better early rejection for h_segment where its all 1.0
-hidden surface removal
 occulision culling
 shading
 textures
@@ -459,9 +457,45 @@ std::vector<Tri4d_t> clipMesh(std::vector<Tri4d_t>& mesh, Camera_t camera) {//ha
     return cInput;
 }
 
-std::vector<Tri4d_t> rotTranClipMesh(struct MeshInstance_t mesh, struct Camera_t camera ) {//handles the entire clipping pipeline with a mesh and a camera
+Vec4d_t crossProduct(Vec4d_t a, Vec4d_t b) {
+    Vec4d_t c = {
+        {a.y * b.z - a.z * b.y},
+        {a.z * b.x - a.x * b.z},
+        {a.x * b.y - a.y * b.x}
+    };
+    return c;
+}
+
+int isFrontFacing(Tri4d_t t) {
+    float vP;
+    Vec4d_t vec1, vec2, vC;
+    vec1 = { //b - a
+        {t.v1.x - t.v0.x},{t.v1.y - t.v0.y},{t.v1.z - t.v0.z}
+    };
+    vec2 = { //c - a
+        {t.v2.x - t.v0.x},{t.v2.y - t.v0.y},{t.v2.z - t.v0.z}
+    };
+    vC = crossProduct(vec1, vec2);
+    //dot product of camera and vecCross but we assume camera is at the origin
+    vP = (-t.v0.x * vC.x) + (-t.v0.y * vC.y) + (-t.v0.z * vC.z);
+    if (vP <= 0) return 0;//back facing
+    if (vP > 0) return 1;//front facing
+}
+
+std::vector<Tri4d_t> backFaceCullMesh(std::vector<Tri4d_t> mesh) {
+    int i, result;
+    std::vector<Tri4d_t> output;
+    for (i = 0; i < mesh.size(); i++) {
+        if (isFrontFacing(mesh[i])) {
+            output.push_back(mesh[i]);
+        }
+    }
+    return output;
+}
+
+std::vector<Tri4d_t> rotTranClipCullMesh(struct MeshInstance_t mesh, struct Camera_t camera ) {//handles the entire clipping pipeline with a mesh and a camera
     int i, cResult;
-    std::vector<Tri4d_t> clipped;
+    std::vector<Tri4d_t> clipped, bFCulled;
     cResult = clipOrCull(mesh, camera);
     if (cResult == 0) {//fully out
         std::vector<Tri4d_t> empty;
@@ -470,12 +504,13 @@ std::vector<Tri4d_t> rotTranClipMesh(struct MeshInstance_t mesh, struct Camera_t
     std::vector<Tri4d_t> processing = mesh.parentMesh.Triangles;
     worldSpaceMesh(processing, mesh);
     cameraSpaceMesh(processing, camera);
-    projectMeshMatrix(processing);
+    bFCulled = backFaceCullMesh(processing);
+    projectMeshMatrix(bFCulled);//moved into clip space
     if (cResult < 8) {//partial
-        clipped = clipMesh(processing, camera);
+        clipped = clipMesh(bFCulled, camera);
     }
     else {//fully in
-        clipped = processing;
+        clipped = bFCulled;
     }
     return clipped;
 }
@@ -656,8 +691,6 @@ bool update()
     return true;
 }
 
-float Loop = 1;
-
 void static setup_scene() {//ran once to mesh meshes and instance instances
 
     std::vector<Tri4d_t> mesh1 = {
@@ -713,34 +746,33 @@ void static setup_scene() {//ran once to mesh meshes and instance instances
 
     struct MeshInstance_t mesh1Instance2;
     mesh1Instance2.parentMesh = cubeCube;
-    mesh1Instance2.pos = { 0,50,-150 };
+    mesh1Instance2.pos = { -75,0,0 };
 
-    //struct MeshInstance_t mesh1Instance3;
-    //mesh1Instance3.parentMesh = cubeCube;
-    //mesh1Instance3.pos = { 150,0,0 };
+    struct MeshInstance_t mesh1Instance3;
+    mesh1Instance3.parentMesh = cubeCube;
+    mesh1Instance3.pos = { 75,0,-300 };
     
 
     struct Camera_t camera;
-    camera.position = { 0,30,300 };//by default facing down -Z
+    camera.position = { 0,30,200 };//by default facing down -Z
     camera.rotation = { 0,0,0 };
 
     rendererScene.meshInstances.push_back(mesh1Instance1);
-    rendererScene.meshInstances.push_back(mesh1Instance2);
+    //rendererScene.meshInstances.push_back(mesh1Instance2);
     //rendererScene.meshInstances.push_back(mesh1Instance3);
     rendererScene.meshInstanceCount = rendererScene.meshInstances.size();
     rendererScene.camera = camera;
-
 }
 
 void render_scene(struct Scene_t scene) {//rendering pipeline brought together
     int i, j;
     std::vector<Tri3d_t> tempProjected;
     for (i = 0; i < scene.meshInstanceCount; i++) {
-        std::vector<Tri4d_t> tempTri = rotTranClipMesh(scene.meshInstances[i], scene.camera);
+        std::vector<Tri4d_t> tempTri = rotTranClipCullMesh(scene.meshInstances[i], scene.camera);
         tempProjected = perspectiveDivide(tempTri);
         std::vector<Tri2d_t> tempScreen = viewportTransformation(tempProjected);
         for (j = 0; j < tempScreen.size(); j++) {
-            drawShadedTri(tempScreen[j], (multiplyColour(0x110000ff, j)));
+            drawShadedTri(tempScreen[j], (multiplyColour(0x110000ff, j + 3)));
         }
         for (j = 0; j < tempScreen.size(); j++) {
             //drawWireTri(tempScreen[j]);
@@ -763,7 +795,7 @@ void render(Uint64 aTicks)/*does the funny rendering*/
     rendererScene.meshInstances[0].rot.x += .01;
     rendererScene.meshInstances[0].rot.y += .01;
     rendererScene.meshInstances[0].rot.z += .01;
-    rendererScene.meshInstances[1].rot.y += .01;
+    //rendererScene.meshInstances[1].rot.y += .01;
     //rendererScene.camera.rotation.y += 0.01;
     render_scene(rendererScene);
    
@@ -793,7 +825,7 @@ int main(int argc, char** argv)
 
     gFrameBuffer = new int[WINDOW_WIDTH * WINDOW_HEIGHT];
     zBuffer = new double[WINDOW_WIDTH * WINDOW_HEIGHT];
-    gSDLWindow = SDL_CreateWindow("SDL3 window", WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+    gSDLWindow = SDL_CreateWindow("SDL3 window", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_FULLSCREEN);
     gSDLRenderer = SDL_CreateRenderer(gSDLWindow, NULL);
     gSDLTexture = SDL_CreateTexture(gSDLRenderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, WINDOW_WIDTH, WINDOW_HEIGHT);
 
